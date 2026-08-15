@@ -1,0 +1,19 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "ryu.crm",
+  "version": "1.0.0",
+  "description": "Harbor: an object-first, schema-flexible CRM that runs entirely on your node. Define your own objects and typed fields, keep records as validated value bags with materialised relation edges in both directions, work them through saved table/board/list views and Attio-style curated lists, and read one unified activity timeline per record. CSV import with column mapping, a dry-run report and dedupe/merge is first-class; FTS5 search and pipeline/funnel reporting come with it. One SQLite database the node owns, reached through the grant-gated `crm.records` capability.",
+  "keywords": [
+    "crm",
+    "contacts",
+    "pipeline",
+    "deals",
+    "sales"
+  ],
+  "extensions": {
+    "com.ryuhq.ryu": {
+      "id": "@ryu/crm",
+      "displayName": "Harbor"
+    }
+  }
+}
