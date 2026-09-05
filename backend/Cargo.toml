@@ -1,0 +1,85 @@
+[package]
+name = "ryu-crm"
+# The version the publish train is on. `tools/publish-crates.sh` reads TRAIN_VERSION
+# from the FIRST crate in its list and requires every crate in the set to be on it,
+# so an apps-store backend that drifts to its own version silently breaks the
+# release. Every other `apps-store/*/backend` is on 0.1.9; so is this one.
+version = "0.2.8"
+edition = "2021"
+license = "Apache-2.0"
+description = "Harbor for Ryu: an object-first, schema-flexible CRM. Owns the whole spine out-of-process — user-definable objects and typed fields, records as validated JSON value bags, materialised relation edges, saved views (table/board/list), Attio-style curated lists with list-specific fields, a unified per-record activity timeline with tasks, CSV import with column mapping and dedupe/merge, FTS5 search and pipeline/funnel reporting — as a SQLite-backed sidecar Core spawns and proxies to on loopback. ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# Sidecar-ONLY: this crate is a process, not a library Core links. Unlike
+# `ryu-meetings`/`ryu-quests`/`ryu-recipes` (lib-plus-bin hybrids that ALSO compile
+# into Core as a path dependency), the shape here is `ryu-social`'s: one `[[bin]]`,
+# every module bin-private via `mod` declarations in `main.rs`, and no `lib.rs`.
+# Core reaches this app exclusively through the generic ext-proxy
+# (`/api/ext/@ryu/crm/*` + the `public_mount` at `/api/crm`), so there is nothing
+# for Core to link and no `apps/core` dep in either direction.
+[[bin]]
+name = "ryu-crm"
+path = "src/main.rs"
+
+# Versions are matched to apps/core/Cargo.toml (and to the sibling apps-store
+# backends) so this crate joining the root workspace via the `apps-store/*/backend`
+# member glob introduces NO version skew for any other job building the tree.
+[dependencies]
+ryu-sidecar-runtime = { path = "../crates/core/sidecar-runtime", version = "0.2.8" }
+# `full` is required, not optional: the bin needs the multi-thread runtime + macros
+# + net for `#[tokio::main]` / `TcpListener` / `axum::serve`, and the due-task sweep
+# needs `tokio::time` + `tokio::spawn`.
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+# Every timestamp in this app is an RFC-3339 STRING with millisecond precision and a
+# `Z` suffix (see `models::now_rfc3339`), so `chrono` is used for producing and
+# parsing them — the date/datetime field validators parse user input through it.
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+# FTS5 needs NO extra cargo feature: `bundled` compiles SQLite with
+# `-DSQLITE_ENABLE_FTS5` unconditionally (libsqlite3-sys `build.rs`), so
+# `CREATE VIRTUAL TABLE … USING fts5(…)` is available on every platform we ship.
+# Pinned to Core's 0.40 line so joining the workspace moves nobody's resolution.
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+tracing = "0.1"
+# Sidecar-binary-only deps (data-dir resolution + logging), mirroring `ryu-social`
+# / `ryu-mail`.
+dirs = "5"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# The app-event emit client: raises the `contributes.hook_events` this app declares
+# in its manifest (`record.created` / `record.updated` / `deal.stage_changed` /
+# `task.due`) so plugin hooks and event-triggered workflows can react to a CRM
+# change without this crate knowing they exist. This is the ONE cross-crate
+# dependency, and it does not violate the zero-Core rule: it is a standalone crate
+# holding only the OUTBOUND half of the emit call (an HTTP POST to Core's
+# `events.emit` capability), so it links none of Core. Emitting is best-effort and
+# no-ops when the process is not Core-hosted, so it stays safe under this crate's
+# own tests and any standalone run.
+#
+# The `version` alongside the `path` is mandatory, not decorative: the published
+# satellite tree has no sibling `crates/`, and the version is what lets it resolve
+# this dep from the registry instead.
+ryu-app-events = { path = "../crates/core/app-events", version = "0.2.8" }
+
+# The OpenAPI document this sidecar serves at `/openapi.json`. It is not decoration
+# and it is not for humans: Core fetches it on this process's first Healthy edge and
+# lowers every operation it finds into a searchable LLM tool, intersected against the
+# manifest's declared `sidecars[].http.routes[]`. Without it Harbor's 53-route surface
+# contributes ZERO agent tools no matter how good the handlers are.
+#
+# Pinned to the workspace-wide 5.5.0 line. There is deliberately no `utoipa-axum`
+# companion: that crate would let the router itself collect the operations, but it is
+# not in the workspace, so the `paths(...)` list in `api/mod.rs` is hand-written and a
+# new route only appears in the document once it is added there.
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+
+# NOTE ON ABSENT DEPS, so a later agent does not "restore" them:
+#   * `reqwest` — v1 makes NO outbound HTTP of its own (email sync, calendar sync
+#     and Composio enrichment are explicitly out of scope). The one outbound call
+#     this process makes is the event emit, and `ryu-app-events` owns that client.
+#   * `csv` — the import parser is hand-rolled in `store::parse_csv` (RFC-4180
+#     quoting, ~50 lines). Adding a crate the workspace does not already carry
+#     would churn the shared `Cargo.lock` for every other job building this tree.
